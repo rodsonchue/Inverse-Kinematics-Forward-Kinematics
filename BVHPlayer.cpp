@@ -353,14 +353,14 @@ static void idle(void)
 
 #else
         // -----------------------------------
-        // TODO: [Part 1 - Animation Basics]
+        // [Part 1 - Animation Basics]
         // -----------------------------------
 
         if ( bvh )
-		{
-                        			
-            frame_no = 0;
-
+		{            			
+			// get a rounded down float value of number of frames elapsed
+			// apply modulus on number of frames to obtain specific frame at time t.
+            frame_no = ((int) (animation_time / bvh->getFrameTime()) % bvh->getNumFrames());
 		}
 		else
 			frame_no = 0;
