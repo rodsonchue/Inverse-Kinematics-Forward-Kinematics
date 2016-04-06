@@ -217,7 +217,7 @@ void  BVHAnimator::renderSkeleton( const JOINT* joint, const float*data, float s
 void  BVHAnimator::renderJointsGL( const JOINT* joint, const float*data, float scale )
 {	
     // --------------------------------------
-    // TODO: [Part 2a - Forward Kinematics]
+    // [Part 2a - Forward Kinematics]
     // --------------------------------------
     
 	color[0] = 1.; color[1] = 0.; color[2] = 0.;
