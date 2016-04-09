@@ -377,16 +377,50 @@ void getScaledOffset(OFFSET& c, OFFSET a, OFFSET b, float scale)
 void BVHAnimator::renderMannequin(int frame, float scale) {
 
     // --------------------------------------
-    // TODO: [Part 2c - Forward Kinematics]
+    // [Part 2c - Forward Kinematics]
     // --------------------------------------
 	// You can draw a couple of basic geometries to build the mannequin 
     // using the renderSphere() and renderBone() provided in BVHAnimator.cpp 
     // or GL functions like glutSolidCube(), etc.
     
-    _bvh->quaternionMoveTo(frame, scale);
-    //_bvh->matrixMoveTo(frame, scale);
-    // NOTE: you can use matrix or quaternion to calculate the transformation
+    //_bvh->quaternionMoveTo(frame, scale);
 
+    _bvh->matrixMoveTo(frame, scale);
+    // Using matrix to calculate
+
+	std::vector<JOINT*> jointList = _bvh->getJointList();
+	for (std::vector<JOINT*>::iterator it = jointList.begin(); it != jointList.end(); it++)
+	{
+		glPushMatrix();
+
+		GLdouble m[16];
+		mat4ToGLdouble16(m, (*it)->matrix);
+		glMultMatrixd(m);
+
+		//Applies to all primitives drawn for consistency
+		float thickness = 0.1;
+		float sphereThickness = thickness * 1.2;
+
+		//If endpoint, only draw sphere
+		color[0] = 1.; color[1] = 0.; color[2] = 0.;
+		renderSphere(0, 0, 0, sphereThickness); //slightly more for distinction
+
+		//If not an endpoint, also draw bones going out towards each child joint
+		if (!(*it)->is_site) {
+
+			//Only needs to be redefined once for each loop
+			color[0] = 0.; color[1] = 1.; color[2] = 0.;
+			for (std::vector<JOINT*>::iterator cit = (*it)->children.begin();
+				 cit != (*it)->children.end(); cit++) {
+
+				renderBone(0., 0., 0.,
+					(*cit)->offset.x * scale, (*cit)->offset.y * scale, (*cit)->offset.z * scale,
+					thickness);
+			}
+		}
+
+		glPopMatrix();
+	}
 
 }
 
