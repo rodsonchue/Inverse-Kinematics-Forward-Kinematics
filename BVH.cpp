@@ -283,7 +283,7 @@ void BVH::quaternionMoveJoint(JOINT* joint, float* mdata, float scale)
     joint->transform.quaternion = glm::quat();
 
     // --------------------------------------
-    // TODO: [Part 2b - Forward Kinematics]
+    // [Part 2b - Forward Kinematics]
     // --------------------------------------
     // maintain the translation and the quaternion in the joint->transform properly
     // 

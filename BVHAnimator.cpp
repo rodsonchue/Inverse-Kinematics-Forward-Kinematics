@@ -9,6 +9,7 @@
 #include <ctime>
 
 #include <iostream>
+#include <queue>
 using namespace std;
 
 // color used for rendering, in RGB
@@ -453,22 +454,197 @@ void BVHAnimator::solveLeftArm(int frame_no, float scale, float x, float y, floa
     //
     // Put your code below
     // -------------------------------------------------------
+	glm::vec3 target(x, y, z);
 	bool isNotGoodEnough = true;
 	int cycles = 0;
+	float errorMargin = 0.0001;
 
-	//Find the base position of the shoulder
-	//hip->
+	//p0, the base position of the shoulder (base of the IK)
+	glm::vec3 p0 = lshldr->transform.translation;
+	//The additional quaternion to apply for this joint
+	glm::quat p0quat = glm::quat();
+
+	//p1, the position of the left arm joint
+	glm::vec3 p1 = larm->transform.translation;
+	//The additional quaternion to apply for this joint
+	glm::quat p1quat = glm::quat();
+
+	//p2, the position of the left forearm joint
+	glm::vec3 p2 = lforearm->transform.translation;
+	//p3, the position of the end point (on the hand)
+	glm::vec3 p3 = lhand->transform.translation;
+
+	//K is the length of a vector
+	float k_cos_theta;
+	float k;
+	//The additional rotation to perform for any given orientation
+	glm::quat rotationQuat;
+
+	//If error is trivial enough, we assume it is already "good enough"
+	if (p3.x - x < errorMargin &&
+		p3.y - y < errorMargin && 
+		p3.x - x < errorMargin) {
+		isNotGoodEnough = false;
+	}
+	
 
 	//Try to find a good orientation for all involved joints
 	while (isNotGoodEnough || cycles > 1000) {
-		//Move left forearm
-		//Compute left forearm to 
-		//lforearm->matrix
-		//LFAry->
+		for (uint j = 0; j <= 1 && isNotGoodEnough; j++) {
+			JOINT* joint;
+			glm::vec3 p;
+			if (j == 0) {
+				//We rotate elbow
+				joint = larm;
+				p = p1;
+			}
+			else { //j == 1
+				//We rotate shoulder
+				joint = lshldr;
+				p = p0;
+			}
 
-		//Move left arm
+			//////////////////////////////////////////////////////////////////////////////////////
+			//General steps to apply a quaternion to a joint and update its children as follows.
+
+			//Step 1: Get a quaternion that rotates the joint towards end point
+			//v, the normalized vector from p to the "current" end point
+			glm::vec3 v = glm::normalize(p3 - p);
+			//t, the normalized vector from p to the "target" end point
+			glm::vec3 t = glm::normalize(target - p);
+			//Compute quaternion to apply to reach target point (as much as possible)
+			k_cos_theta = glm::dot(v, t);
+			k = glm::sqrt(glm::length(v) * glm::length(v)
+				* glm::length(t) * glm::length(t));
+			rotationQuat = glm::quat(k_cos_theta + k, glm::cross(v, t));
+
+			//Fore arm has only 1DOF (in Y axis), so we must remove the other degrees from quat
+			if (j == 0) {
+				rotationQuat.x = 0;
+				rotationQuat.z = 0;
+			}
+
+			rotationQuat = glm::normalize(rotationQuat);
+			if (j == 0) {
+				p0quat = p0quat * rotationQuat;
+			}
+			else {
+				p1quat = p1quat * rotationQuat;
+			}
+
+			//Step 2: Update joint data for itself and all its children
+			//If we process the joints in FIFO, we guarentee the updates are correct
+			//i.e child joints will not be processed until their parents are
+			std::queue<JOINT*> jointQueue;
+			jointQueue.push(joint);
+
+			while (!jointQueue.empty()) {
+				JOINT* joint = jointQueue.front();
+				jointQueue.pop();
+
+				// extract value from motion data  (again)
+				// translate to the offset and set the rotation to identity
+				joint->transform.translation = glm::vec3(joint->offset.x * scale,
+					joint->offset.y * scale,
+					joint->offset.z * scale);
+				joint->transform.quaternion = glm::quat();
+
+				RigidTransform rt;
+				rt.quaternion = glm::quat();
+				rt.translation = glm::vec3(joint->offset.x * scale,
+					joint->offset.y * scale,
+					joint->offset.z * scale);
+
+				for (uint i = 0; i < joint->channels.size(); i++)
+				{
+					CHANNEL *channel = joint->channels[i];
+					float value = mdata[channel->index];
+					switch (channel->type) {
+					case X_POSITION:
+						rt.translation.x += value * scale;
+						break;
+
+					case Y_POSITION:
+						rt.translation.y += value * scale;
+						break;
+
+					case Z_POSITION:
+						rt.translation.z += value * scale;
+						break;
+
+					case X_ROTATION:
+					{
+						rt.quaternion = rt.quaternion
+							* glm::angleAxis(value, glm::vec3(1.f, 0.f, 0.f));
+						break;
+					}
+					case Y_ROTATION:
+					{
+						rt.quaternion = rt.quaternion
+							* glm::angleAxis(value, glm::vec3(0.f, 1.f, 0.f));
+						break;
+					}
+					case Z_ROTATION:
+					{
+						rt.quaternion = rt.quaternion
+							* glm::angleAxis(value, glm::vec3(0.f, 0.f, 1.f));
+						break;
+					}
+					}
+
+					if (joint == lshldr) {
+						//Its translation does not change
+						//inherit the parent's orientation
+						joint->transform.quaternion =
+							glm::cross(joint->parent->transform.quaternion, rt.quaternion);
+						//and then add the additional rotation
+						joint->transform.quaternion =
+							glm::cross(joint->transform.quaternion, p0quat);
+					}
+					else if (joint == larm) {
+						//Update its translation
+						joint->transform.translation = joint->parent->transform.translation
+							+ (joint->parent->transform.quaternion * rt.translation);
+
+						//inherit the parent's orientation
+						joint->transform.quaternion =
+							glm::cross(joint->parent->transform.quaternion, rt.quaternion);
+						//and then add the additional rotation
+						joint->transform.quaternion =
+							glm::cross(joint->transform.quaternion, p1quat);
+					}
+					else {
+						//For all other children joints
+						//Update its translation
+						joint->transform.translation = joint->parent->transform.translation
+							+ (joint->parent->transform.quaternion * rt.translation);
+
+						//inherit the parent's orientation
+						joint->transform.quaternion =
+							glm::cross(joint->parent->transform.quaternion, rt.quaternion);
+					}
+				}
+
+				//Add all children joints to the queue
+				for (JOINT* jointChild : joint->children) {
+					jointQueue.push(jointChild);
+				}
+			}
+
+			//Step 3: Update new locations of points, and check if solution is good
+			p0 = lshldr->transform.translation;
+			p1 = larm->transform.translation;
+			p2 = lforearm->transform.translation;
+			p3 = lhand->transform.translation;
+
+			//If error is trivial enough, we assume it is "good enough"
+			if (p3.x - x < errorMargin &&
+				p3.y - y < errorMargin &&
+				p3.x - x < errorMargin) {
+				isNotGoodEnough = false;
+			}
+		}
 	}
-
 
 
 
