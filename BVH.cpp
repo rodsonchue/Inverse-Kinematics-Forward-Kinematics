@@ -311,19 +311,19 @@ void BVH::quaternionMoveJoint(JOINT* joint, float* mdata, float scale)
 		case X_ROTATION:
         {            
 			joint->transform.quaternion = joint->transform.quaternion
-				* glm::angleAxis(glm::radians(value), glm::vec3(1.f, 0.f, 0.f));
+				* glm::angleAxis(value, glm::vec3(1.f, 0.f, 0.f));
 			break;
         }
 		case Y_ROTATION:
         {	
 			joint->transform.quaternion = joint->transform.quaternion
-				* glm::angleAxis(glm::radians(value), glm::vec3(0.f, 1.f, 0.f));
+				* glm::angleAxis(value, glm::vec3(0.f, 1.f, 0.f));
 			break;
         }
 		case Z_ROTATION:        
         {		
 			joint->transform.quaternion = joint->transform.quaternion
-				* glm::angleAxis(glm::radians(value), glm::vec3(0.f, 0.f, 1.f));
+				* glm::angleAxis(value, glm::vec3(0.f, 0.f, 1.f));
 			break;
         }
 		}
@@ -332,15 +332,15 @@ void BVH::quaternionMoveJoint(JOINT* joint, float* mdata, float scale)
     // apply parent's transfomation matrix to this joint to make the transformation global
     if (joint->parent != NULL) {
 
-		//Global orientation of joint
-		//is cross product of its orientation with the parent's orientation
-		joint->transform.quaternion = 
-			glm::cross(joint->parent->transform.quaternion, joint->transform.quaternion);
-
 		//Translation: begin from parent's end point 
 		// and translate according to its global orientation
 		joint->transform.translation = joint->parent->transform.translation
-			+ (joint->transform.quaternion * joint->transform.translation);
+			+ (joint->parent->transform.quaternion * joint->transform.translation);
+
+		//Global orientation of joint
+		//is cross product of its orientation with the parent's orientation
+		joint->transform.quaternion =
+			glm::cross(joint->parent->transform.quaternion, joint->transform.quaternion);
 
     }
 
