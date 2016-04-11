@@ -285,10 +285,6 @@ void BVH::quaternionMoveJoint(JOINT* joint, float* mdata, float scale)
     // --------------------------------------
     // [Part 2b - Forward Kinematics]
     // --------------------------------------
-    // maintain the translation and the quaternion in the joint->transform properly
-    // 
-    // NOTE: calculating transformation using matrix and converting to quaternion
-    // will not be counted as the valid solution.
 
     for (uint i = 0; i < joint->channels.size(); i++)
     {        		

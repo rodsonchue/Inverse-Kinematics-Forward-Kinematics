@@ -9,7 +9,6 @@
 #include <ctime>
 
 #include <iostream>
-#include <queue>
 using namespace std;
 
 // color used for rendering, in RGB
@@ -380,23 +379,23 @@ void BVHAnimator::renderMannequin(int frame, float scale) {
     // --------------------------------------
     // [Part 2c - Forward Kinematics]
     // --------------------------------------
-	// You can draw a couple of basic geometries to build the mannequin 
-    // using the renderSphere() and renderBone() provided in BVHAnimator.cpp 
-    // or GL functions like glutSolidCube(), etc.
     
-    //_bvh->quaternionMoveTo(frame, scale);
-
-    _bvh->matrixMoveTo(frame, scale);
-    // Using matrix to calculate
+	// Using quaternion to calculate
+    _bvh->quaternionMoveTo(frame, scale);
+	//_bvh->matrixMoveTo(frame, scale);
 
 	std::vector<JOINT*> jointList = _bvh->getJointList();
 	for (std::vector<JOINT*>::iterator it = jointList.begin(); it != jointList.end(); it++)
 	{
 		glPushMatrix();
 
+		glm::mat4 mat = rigidToMat4((*it)->transform);
 		GLdouble m[16];
-		mat4ToGLdouble16(m, (*it)->matrix);
+		mat4ToGLdouble16(m, mat);
 		glMultMatrixd(m);
+
+		//*Disclaimer* This implementation is not a realistic skin,
+		//However, it is simple, elegant and should be sufficient enough
 
 		//Applies to all primitives drawn for consistency
 		float thickness = 0.1;
@@ -429,7 +428,6 @@ void BVHAnimator::solveLeftArm(int frame_no, float scale, float x, float y, floa
 {
     //_bvh->matrixMoveTo(frame_no, scale);      
     _bvh->quaternionMoveTo(frame_no, scale);
-    // NOTE: you can use either matrix or quaternion to calculate the transformation
 
 	float *LArx, *LAry, *LArz, *LFAry;
 	
@@ -450,46 +448,39 @@ void BVHAnimator::solveLeftArm(int frame_no, float scale, float x, float y, floa
     clock_t start_time = clock();
 
     // -------------------------------------------------------
-    // TODO: [Part 3] - Inverse Kinematics
-    //
-    // Put your code below
+    // [Part 3] - Inverse Kinematics
     // -------------------------------------------------------
 	glm::vec3 target(x, y, z);
 	bool isNotGoodEnough = true;
 	int cycles = 0;
+	int cycleLimit = 1000; //We put an upper limit to number of cycles
+
+	//If the end point comes close to target point with this error margin, it is accepted
 	float errorMargin = 0.0001;
 
 	//p0, the base position of the shoulder (base of the IK)
 	glm::vec3 p0 = lshldr->transform.translation;
-	//The additional quaternion to apply for this joint
-	glm::quat p0quat = glm::quat();
-
 	//p1, the position of the left arm joint
 	glm::vec3 p1 = larm->transform.translation;
-	//The additional quaternion to apply for this joint
-	glm::quat p1quat = glm::quat();
-
 	//p2, the position of the left forearm joint
 	glm::vec3 p2 = lforearm->transform.translation;
 	//p3, the position of the end point (on the hand)
 	glm::vec3 p3 = lhand->transform.translation;
 
-	//K is the length of a vector
-	float k_cos_theta;
-	float k;
-	//The additional rotation to perform for any given orientation
+	//The additional rotation to apply on the joint
 	glm::quat rotationQuat;
 
 	//If error is trivial enough, we assume it is already "good enough"
-	if (p3.x - x < errorMargin &&
-		p3.y - y < errorMargin && 
-		p3.x - x < errorMargin) {
+	if (glm::abs(p3.x - x) < errorMargin &&
+		glm::abs(p3.y - y) < errorMargin &&
+		glm::abs(p3.x - x) < errorMargin) {
 		isNotGoodEnough = false;
 	}
 	
 
 	//Try to find a good orientation for all involved joints
-	while (isNotGoodEnough || cycles > 1000) {
+	//By applying Cyclic Coordinate Descent (CCD)
+	while (isNotGoodEnough && cycles < cycleLimit) {
 		for (uint j = 0; j <= 1 && isNotGoodEnough; j++) {
 			JOINT* joint;
 			glm::vec3 p;
@@ -504,150 +495,75 @@ void BVHAnimator::solveLeftArm(int frame_no, float scale, float x, float y, floa
 				p = p0;
 			}
 
-			//////////////////////////////////////////////////////////////////////////////////////
-			//General steps to apply a quaternion to a joint and update its children as follows.
-
-			//Step 1: Get a quaternion that rotates the joint towards end point
-			//v, the normalized vector from p to the "current" end point
-			glm::vec3 v = glm::normalize(p3 - p);
-			//t, the normalized vector from p to the "target" end point
-			glm::vec3 t = glm::normalize(target - p);
-			//Compute quaternion to apply to reach target point (as much as possible)
-			k_cos_theta = glm::dot(v, t);
-			k = glm::sqrt(glm::length(v) * glm::length(v)
-				* glm::length(t) * glm::length(t));
-			rotationQuat = glm::quat(k_cos_theta + k, glm::cross(v, t));
-
-			//Fore arm has only 1DOF (in Y axis), so we must remove the other degrees from quat
-			if (j == 0) {
-				rotationQuat.x = 0;
-				rotationQuat.z = 0;
-			}
-
-			rotationQuat = glm::normalize(rotationQuat);
-			if (j == 0) {
-				p0quat = p0quat * rotationQuat;
-			}
-			else {
-				p1quat = p1quat * rotationQuat;
-			}
-
-			//Step 2: Update joint data for itself and all its children
-			//If we process the joints in FIFO, we guarentee the updates are correct
-			//i.e child joints will not be processed until their parents are
-			std::queue<JOINT*> jointQueue;
-			jointQueue.push(joint);
-
-			while (!jointQueue.empty()) {
-				JOINT* joint = jointQueue.front();
-				jointQueue.pop();
-
-				// extract value from motion data  (again)
-				// translate to the offset and set the rotation to identity
-				joint->transform.translation = glm::vec3(joint->offset.x * scale,
-					joint->offset.y * scale,
-					joint->offset.z * scale);
-				joint->transform.quaternion = glm::quat();
-
-				RigidTransform rt;
-				rt.quaternion = glm::quat();
-				rt.translation = glm::vec3(joint->offset.x * scale,
-					joint->offset.y * scale,
-					joint->offset.z * scale);
-
-				for (uint i = 0; i < joint->channels.size(); i++)
-				{
-					CHANNEL *channel = joint->channels[i];
-					float value = mdata[channel->index];
-					switch (channel->type) {
-					case X_POSITION:
-						rt.translation.x += value * scale;
-						break;
-
-					case Y_POSITION:
-						rt.translation.y += value * scale;
-						break;
-
-					case Z_POSITION:
-						rt.translation.z += value * scale;
-						break;
-
-					case X_ROTATION:
-					{
-						rt.quaternion = rt.quaternion
-							* glm::angleAxis(value, glm::vec3(1.f, 0.f, 0.f));
-						break;
-					}
-					case Y_ROTATION:
-					{
-						rt.quaternion = rt.quaternion
-							* glm::angleAxis(value, glm::vec3(0.f, 1.f, 0.f));
-						break;
-					}
-					case Z_ROTATION:
-					{
-						rt.quaternion = rt.quaternion
-							* glm::angleAxis(value, glm::vec3(0.f, 0.f, 1.f));
-						break;
-					}
-					}
-
-					if (joint == lshldr) {
-						//Its translation does not change
-						//inherit the parent's orientation
-						joint->transform.quaternion =
-							glm::cross(joint->parent->transform.quaternion, rt.quaternion);
-						//and then add the additional rotation
-						joint->transform.quaternion =
-							glm::cross(joint->transform.quaternion, p0quat);
-					}
-					else if (joint == larm) {
-						//Update its translation
-						joint->transform.translation = joint->parent->transform.translation
-							+ (joint->parent->transform.quaternion * rt.translation);
-
-						//inherit the parent's orientation
-						joint->transform.quaternion =
-							glm::cross(joint->parent->transform.quaternion, rt.quaternion);
-						//and then add the additional rotation
-						joint->transform.quaternion =
-							glm::cross(joint->transform.quaternion, p1quat);
-					}
-					else {
-						//For all other children joints
-						//Update its translation
-						joint->transform.translation = joint->parent->transform.translation
-							+ (joint->parent->transform.quaternion * rt.translation);
-
-						//inherit the parent's orientation
-						joint->transform.quaternion =
-							glm::cross(joint->parent->transform.quaternion, rt.quaternion);
-					}
-				}
-
-				//Add all children joints to the queue
-				for (JOINT* jointChild : joint->children) {
-					jointQueue.push(jointChild);
-				}
-			}
-
-			//Step 3: Update new locations of points, and check if solution is good
 			p0 = lshldr->transform.translation;
 			p1 = larm->transform.translation;
 			p2 = lforearm->transform.translation;
 			p3 = lhand->transform.translation;
 
+			//////////////////////////////////////////////////////////////////////////////////////
+			//General steps to apply a quaternion to a joint and update its children as follows.
+
+			//Step 1: Get a unit quaternion that rotates the joint towards end point
+			//v, the normalized vector from p to the "current" end point
+			glm::vec3 v = glm::normalize(p3 - p);
+			//t, the normalized vector from p to the "target" end point
+			glm::vec3 t = glm::normalize(target - p);
+
+			//Compute unit quaternion to apply to reach target point (as much as possible)
+
+			//Following is an older implementation that is claimed to be less efficient.
+			//src: http://stackoverflow.com/questions/1171849/finding-quaternion-representing-the-rotation-from-one-vector-to-another
+			/*
+			//A unit quaternion with twice the required rotation.
+			rotationQuat = glm::normalize(glm::quat(glm::dot(v, t), glm::cross(v, t)));
+
+			//Normalize it after adding the zero rotation quaternion (1,0,0,0) to acheive half the rotation
+			rotationQuat = glm::normalize(glm::quat(rotationQuat.w + 1, rotationQuat.x, rotationQuat.y, rotationQuat.z));
+			*/
+
+			//This is the newer (suggested) implementation
+			float k_cos_theta = glm::dot(v, t);
+			float k = glm::sqrt(glm::length(v) * glm::length(v)
+			* glm::length(t) * glm::length(t));
+			rotationQuat = glm::normalize(glm::quat(k_cos_theta + k, glm::cross(v, t)));
+
+			//Step 2: Compute the roll pitch yaw to apply back to the joint to acheive required rotation
+			//src: https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+			float roll = glm::atan(2 * ((rotationQuat.w * rotationQuat.x) + (rotationQuat.y * rotationQuat.z)),
+				1 - (2 * ((rotationQuat.x * rotationQuat.x) + (rotationQuat.y * rotationQuat.y))));
+			float pitch = glm::asin(2 * ((rotationQuat.w * rotationQuat.y) - (rotationQuat.z * rotationQuat.x)));
+			float yaw = glm::atan(2 * ((rotationQuat.w * rotationQuat.z) + (rotationQuat.x * rotationQuat.y)),
+				1 - (2 * ((rotationQuat.y * rotationQuat.y)+(rotationQuat.z * rotationQuat.z))));
+
+			//For forearm joint, we only apply pitch rotation (y axis)
+			if (j == 0) {
+				(*LFAry) += glm::degrees(pitch);
+			}
+			else {
+				(*LArx) += glm::degrees(roll);
+				(*LAry) += glm::degrees(pitch);
+				(*LArz) += glm::degrees(yaw);
+			}
+
+			//Step 3: Update new locations of points, and check if solution is good
+			_bvh->quaternionMoveTo(frame_no, scale);
+
 			//If error is trivial enough, we assume it is "good enough"
-			if (p3.x - x < errorMargin &&
-				p3.y - y < errorMargin &&
-				p3.x - x < errorMargin) {
+			p3 = lhand->transform.translation;
+			if (glm::abs(p3.x - x) < errorMargin &&
+				glm::abs(p3.y - y) < errorMargin &&
+				glm::abs(p3.x - x) < errorMargin) {
 				isNotGoodEnough = false;
 			}
 		}
+
+		//Marks the end of one cycle
+		cycles++;
+
 	}
 
-
-
+	//Keeps track of the number of cycles;
+	//cout << "Solving done in " << cycles << " cycles" << endl;
 
 
     // ----------------------------------------------------------
