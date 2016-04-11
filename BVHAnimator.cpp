@@ -427,8 +427,8 @@ void BVHAnimator::renderMannequin(int frame, float scale) {
 
 void BVHAnimator::solveLeftArm(int frame_no, float scale, float x, float y, float z)
 {
-    _bvh->matrixMoveTo(frame_no, scale);      
-    //_bvh->quaternionMoveTo(frame_no, scale);
+    //_bvh->matrixMoveTo(frame_no, scale);      
+    _bvh->quaternionMoveTo(frame_no, scale);
     // NOTE: you can use either matrix or quaternion to calculate the transformation
 
 	float *LArx, *LAry, *LArz, *LFAry;
